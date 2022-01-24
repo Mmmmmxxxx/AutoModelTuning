@@ -1,0 +1,273 @@
+---
+title: "ML1 Project"
+output: html_notebook
+---
+
+#Auto
+```{r}
+library(caret)
+library(caretEnsemble)
+library(ranger)
+library(MASS)
+library(arm)
+library(glmnet)
+library(Matrix)
+library(tidyr)
+library(tidyverse)
+library(dplyr)
+library(fastAdaboost)
+library(binda)
+library(ada)
+library(plyr)
+library(fastAdaboost)
+
+
+set.seed(19)
+
+data = read.csv("/Users/xm/Library/Mobile Documents/com~apple~CloudDocs/UM/FALL/term2/ml/Project/train_data.csv")
+
+data$Y = factor(data$Y)
+levels(data$Y) = c('N', 'Y')
+
+#Delete missing value
+colSums(is.na(data))
+data = na.omit(data)
+colSums(is.na(data))
+
+  
+# Splitting the data into training and testing data
+train_sub <- createDataPartition(data$Y, p = 0.7, list = F)
+  
+train_data <- data[train_sub, ]
+test_data <- data[-train_sub, ]
+  
+# Split data into Target and Feature variable
+x_train <- train_data %>% select(-Y)
+y_train <- train_data$Y
+  
+x_test <- test_data %>% select(-Y)
+y_test <- test_data$Y
+
+# KFolds
+myFolds <- createFolds(y_train, k = 10)
+  
+
+library(doParallel)
+cl <- makePSOCKcluster(6)
+registerDoParallel(cl)
+```
+
+
+```{r}
+# Train Control variable
+my_control <- trainControl(method = 'cv', number = 10, index = myFolds,
+                           savePredictions = T, classProbs = T, verboseIter = T, summaryFunction = twoClassSummary,
+                           preProcOptions = c(thresh = 0.8), allowParallel = T)
+
+
+model_list <- caretList(
+                        x_train, y_train, trControl = my_control, 
+                        methodList = c("gbm", "ranger", "rf", "xgbTree", "adaboost",
+                                       "ada", 
+                                       "fda", "lda2", "lda", "plr", "glm", 
+                                       "bayesglm", "glmnet"),
+                        tuneList = NULL, 
+                        continue_on_fail = FALSE, 
+                        preProcess = c("center", "scale")
+                        )
+
+resamples <- resamples(model_list)
+dotplot(resamples, metric = "ROC")
+```
+```{r}
+stopCluster(cl)
+```
+
+#Recursive Feature Elimination
+```{r}
+# load the library
+library(caret)
+library(mlbench)
+library(Hmisc)
+library(randomForest)
+# define the control using a random forest selection function
+control <- rfeControl(functions=rfFuncs, method="cv", number=5)
+# run the RFE algorithm
+results <- rfe(x_data, y_data, sizes=c(1:18), rfeControl=control)
+# summarize the results
+print(results)
+# list the chosen features
+predictors(results)
+# plot the results
+plot(results, type=c("g", "o"))       #eliminate X15
+```
+#gbm(ref_-X8)
+```{r}
+x_train_e <- x_train %>% select(-X8)
+x_test_e <- x_test %>% select(-X8)
+
+gbm_e <- train(x_train_e, y_train, method = 'gbm', trControl = my_control,
+                        preProcess = c('center', 'scale'),metric="ROC",
+             verbose = FALSE)
+gbm_e$bestTune
+gbm_e$results[which.max(gbm_e$results$ROC), ]
+plot(gbm_e)
+
+#ROC on test data
+pred_gbm_e <- predict.train(gbm_e, newdata = x_test_e)
+levels(pred_gbm_e) = c(0, 1)
+roc(as.numeric(pred_gbm_e), as.numeric(y_test))
+
+#train model on full data
+x_data <- data %>% select(-Y) %>% select(-X8)
+y_data <- data$Y
+
+model <- train(x_data, y_data, method = 'gbm', trControl = my_control,
+               preProcess = c('center', 'scale'),metric="ROC",
+               verbose = F)
+
+#probs
+test = read.csv("/Users/xm/Library/Mobile Documents/com~apple~CloudDocs/UM/FALL/term2/ml/Project/Test_without_solutions_MAS648 2.csv")
+
+probs = predict(model, newdata=test, type='prob')
+
+#write prediction into file
+ID = seq(1:10000)
+Y = probs$Y
+test_submission = data.frame(ID,Y)
+write.csv(test_submission, '/Users/xm/Library/Mobile Documents/com~apple~CloudDocs/UM/FALL/term2/ml/Project/submission/gbm(ref_-X8).csv', row.names = FALSE)
+```
+
+```{r}
+model_list <- caretList(
+                        x_train_e, y_train, trControl = my_control, 
+                        methodList = c("gbm", "ranger", "rf", "xgbTree", "adaboost",
+                                       "ada", 
+                                       "fda", "lda2", "lda", "plr", "glm", 
+                                       "bayesglm", "glmnet"),
+                        tuneList = NULL, 
+                        continue_on_fail = FALSE, 
+                        preProcess = c("center", "scale")
+                        )
+
+resamples <- resamples(model_list)
+dotplot(resamples, metric = "ROC")
+```
+
+
+
+#TESTING DATA
+```{r}
+library(pROC)
+# Final Predictions
+pred_fda <- predict.train(model_list$fda, newdata = x_test)
+pred_adaboost <- predict.train(model_list$adaboost, newdata = x_test)
+pred_ada <- predict.train(model_list$ada, newdata = x_test)
+pred_gbm <- predict.train(model_list$gbm, newdata = x_test)
+pred_ranger <- predict.train(model_list$ranger, newdata = x_test)
+pred_rf <- predict.train(model_list$rf, newdata = x_test)
+pred_xgbTree <- predict.train(model_list$xgbTree, newdata = x_test)
+pred_lda2 <- predict.train(model_list$lda2, newdata = x_test)
+pred_lda <- predict.train(model_list$lda, newdata = x_test)
+pred_plr <- predict.train(model_list$plr, newdata = x_test)
+pred_glm <- predict.train(model_list$glm, newdata = x_test)
+pred_bayesglm <- predict.train(model_list$bayesglm, newdata = x_test)
+pred_glmnet <- predict.train(model_list$glmnet, newdata = x_test)
+
+levels(y_test) = c(0, 1)
+
+levels(pred_fda) = c(0, 1)
+levels(pred_adaboost) = c(0, 1)
+levels(ada) = c(0, 1)
+levels(pred_gbm) = c(0, 1)
+levels(pred_ranger) = c(0, 1)
+levels(pred_rf) = c(0, 1)
+levels(pred_xgbTree) = c(0, 1)
+levels(pred_lda2) = c(0, 1)
+levels(pred_lda) = c(0, 1)
+levels(pred_plr) = c(0, 1)
+levels(pred_glm) = c(0, 1)
+levels(pred_bayesglm) = c(0, 1)
+levels(pred_glmnet) = c(0, 1)
+
+
+
+# Check ROC
+roc(as.numeric(pred_xgbTree), as.numeric(y_test))
+roc(as.numeric(pred_gbm), as.numeric(y_test))
+roc(as.numeric(pred_adaboost), as.numeric(y_test))
+roc(as.numeric(pred_ada), as.numeric(y_test))
+roc(as.numeric(pred_fda), as.numeric(y_test))
+roc(as.numeric(pred_ranger), as.numeric(y_test))
+roc(as.numeric(pred_rf), as.numeric(y_test))
+roc(as.numeric(pred_lda2), as.numeric(y_test))
+roc(as.numeric(pred_lda), as.numeric(y_test))
+roc(as.numeric(pred_plr), as.numeric(y_test))
+roc(as.numeric(pred_glm), as.numeric(y_test))
+roc(as.numeric(pred_bayesglm), as.numeric(y_test))
+roc(as.numeric(pred_glmnet), as.numeric(y_test))
+
+
+```
+
+```{r}
+x_data <- data %>% select(-Y) 
+y_data <- data$Y
+
+model <- caretList(
+                        x_data, y_data, trControl = my_control, 
+                        methodList = c("xgbTree"),
+                        tuneList = NULL, 
+                        continue_on_fail = FALSE, 
+                        preProcess = c("center", "scale")
+                        )
+```
+
+
+#train model with all data
+```{r}
+x_data <- data %>% select(-Y) 
+y_data <- data$Y
+
+my_control <- trainControl(method = 'cv', number = 6, 
+                           index = myFolds, savePredictions = T, classProbs = T, 
+                           verboseIter = T, summaryFunction = twoClassSummary,
+                           preProcOptions = c(thresh = 0.8), allowParallel = T)
+
+ml <- train(x_data, y_data, method = 'ada', trControl = my_control,
+                       
+             verbose = F)
+
+ml$results[which.max(ml$results$ROC), ]
+```
+
+#probs
+```{r}
+test = read.csv("/Users/xm/Library/Mobile Documents/com~apple~CloudDocs/UM/FALL/term2/ml/Project/Test_without_solutions_MAS648 2.csv")
+
+probs = predict(ml, newdata=test, type='prob')
+
+#write prediction into file
+ID = seq(1:10000)
+Y = probs$Y
+test_submission = data.frame(ID,Y)
+write.csv(test_submission, '/Users/xm/Library/Mobile Documents/com~apple~CloudDocs/UM/FALL/term2/ml/Project/submission/ada_nopre.csv', row.names = FALSE)
+
+```
+
+
+#Predict
+```{r}
+#Predict
+test = read.csv("/Users/xm/Library/Mobile Documents/com~apple~CloudDocs/UM/FALL/term2/ml/Project/Test_without_solutions_MAS648 2.csv")
+pred_plr <- predict(plr, newdata = test)
+levels(pred_plr) = c(0, 1)
+
+#write prediction into file
+ID = seq(1:10000)
+Y = pred_plr
+test_submission = data.frame(ID,Y)
+write.csv(test_submission, '/Users/xm/Library/Mobile Documents/com~apple~CloudDocs/UM/FALL/term2/ml/Project/submission/plr.csv', row.names = FALSE)
+table(Y)
+```
+
